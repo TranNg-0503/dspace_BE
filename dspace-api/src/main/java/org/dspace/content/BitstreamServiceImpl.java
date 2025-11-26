@@ -19,6 +19,7 @@ import javax.annotation.Nullable;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.Logger;
+import org.apache.pdfbox.pdmodel.PDDocument;
 import org.dspace.authorize.AuthorizeException;
 import org.dspace.authorize.service.AuthorizeService;
 import org.dspace.content.dao.BitstreamDAO;
@@ -31,6 +32,7 @@ import org.dspace.core.Context;
 import org.dspace.core.LogHelper;
 import org.dspace.event.Event;
 import org.dspace.storage.bitstore.service.BitstreamStorageService;
+import org.dspace.util.PdfBoxUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /**
@@ -118,8 +120,20 @@ public class BitstreamServiceImpl extends DSpaceObjectServiceImpl<Bitstream> imp
 
     @Override
     public Bitstream create(Context context, InputStream is) throws IOException, SQLException {
-        // Store the bits
-        UUID bitstreamID = bitstreamStorageService.store(context, bitstreamDAO.create(context, new Bitstream()), is);
+        UUID bitstreamID = null;
+        try {
+            PDDocument document = PDDocument.load(is);
+            InputStream watermarkedFile = PdfBoxUtils.addWatermark(document);
+            document.close();
+            // Store the bits
+            bitstreamID = bitstreamStorageService.store(context, bitstreamDAO.create(context, new Bitstream()), watermarkedFile);
+        } catch (Exception e) {
+            log.error("Error adding watermark to document", e);
+        }
+
+        if(bitstreamID == null) {
+            bitstreamID = bitstreamStorageService.store(context, bitstreamDAO.create(context, new Bitstream()), is);
+        }
 
         log.info(LogHelper.getHeader(context, "create_bitstream",
                                       "bitstream_id=" + bitstreamID));
