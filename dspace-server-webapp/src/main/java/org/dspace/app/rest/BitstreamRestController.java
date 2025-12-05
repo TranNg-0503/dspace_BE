@@ -11,6 +11,7 @@ import static org.dspace.app.rest.utils.ContextUtil.obtainContext;
 import static org.dspace.app.rest.utils.RegexUtils.REGEX_REQUESTMAPPING_IDENTIFIER_AS_UUID;
 import static org.springframework.web.bind.annotation.RequestMethod.PUT;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.sql.SQLException;
@@ -21,6 +22,7 @@ import java.util.UUID;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.core.Response;
+import java.io.ByteArrayOutputStream;
 
 import org.apache.catalina.connector.ClientAbortException;
 import org.apache.commons.collections4.ListUtils;
@@ -190,10 +192,11 @@ public class BitstreamRestController {
         }
 
         String waterMarkText = getUserWatermarkText(request.getParameter("authentication-token"));
-
+        String timeStamp = "Authorized licensed use limited to: Ho Chi Minh City University of Technology and Education (HCMUTE). Downloaded on " + Instant.now().toString();
+        // Add hidden watermark only to the first 5 pages of the file
         // Add hidden watermark to the file
         PDDocument document = PDDocument.load(bitstreamResource.getInputStream());
-        InputStream hiddenWatermarkedFile = PdfBoxUtils.addHiddenWatermark(document, waterMarkText);
+        InputStream hiddenWatermarkedFile = PdfBoxUtils.addHiddenWatermark(document, waterMarkText, timeStamp);
         InputStreamResource inputStreamResource = new InputStreamResource(hiddenWatermarkedFile);
         document.close();
 
@@ -420,33 +423,36 @@ public class BitstreamRestController {
         HttpHeaders httpHeaders = httpHeadersInitializer.initialiseHeaders();
 
         if (RequestMethod.HEAD.name().equals(request.getMethod())) {
-          log.debug("HEAD request - no response body");
-          return ResponseEntity.ok().headers(httpHeaders).build();
+            log.debug("HEAD request - no response body");
+            return ResponseEntity.ok().headers(httpHeaders).build();
         }
 
-        String waterMarkText = getUserWatermarkText(request.getParameter("authentication-token"));
-
-        // Add hidden watermark only to the first 5 pages of the file
         PDDocument originalDocument = PDDocument.load(bitstreamResource.getInputStream());
         int pageCount = originalDocument.getNumberOfPages();
         if (pageCount < 5) {
-          originalDocument.close();
-          return ResponseEntity.status(400).body("File must have at least 5 pages to preview");
+            originalDocument.close();
+            return ResponseEntity.status(400).body("File must have at least 5 pages to preview");
         }
 
         PDDocument document = getPreviewDocument(originalDocument);
 
-        InputStream hiddenWatermarkedFile = PdfBoxUtils.addHiddenWatermark(document, waterMarkText);
-        InputStreamResource inputStreamResource = new InputStreamResource(hiddenWatermarkedFile);
+        // --- Bỏ watermark ---
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        document.save(baos);  // Lưu PDF vào output stream
+        InputStream originalStream = new ByteArrayInputStream(baos.toByteArray());
+        InputStreamResource inputStreamResource = new InputStreamResource(originalStream);
+
+
         originalDocument.close();
         document.close();
 
-        // Update the content length to the new length
-        httpHeadersInitializer.withLength(hiddenWatermarkedFile.available());
+        // Update the content length
+        httpHeadersInitializer.withLength(originalStream.available());
         HttpHeaders newHeaders = httpHeadersInitializer.initialiseHeaders();
 
         return ResponseEntity.ok().headers(newHeaders).body(inputStreamResource);
-      }
+    }
+
     } catch (ClientAbortException ex) {
       log.debug("Client aborted the request before the download was completed. " +
           "Client is probably switching to a Range request.", ex);

@@ -5,12 +5,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
-import org.apache.pdfbox.util.Matrix;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
+import org.apache.pdfbox.util.Matrix;
 
 public class PdfBoxUtils {
 
@@ -71,71 +72,76 @@ public class PdfBoxUtils {
     System.out.println("Watermark applied successfully.");
     return new ByteArrayInputStream(output.toByteArray());
   }
+  public static InputStream addHiddenWatermark(
+          PDDocument document,
+          String hiddenEmail,          // watermark ẩn
+          String visibleTimestamp      // watermark hiện
+  ) throws Exception {
 
-  public static InputStream addHiddenWatermark(PDDocument document, String watermarkText) throws Exception {
-    ByteArrayOutputStream output = new ByteArrayOutputStream();
+      ByteArrayOutputStream output = new ByteArrayOutputStream();
 
-    PDFont font = PDType1Font.HELVETICA_BOLD;
-    int fontSize = 4;
+      PDFont hiddenFont = PDType1Font.HELVETICA_BOLD;  // font watermark ẩn
+      int hiddenFontSize = 1;                           // giữ nguyên size cũ
 
-    for (PDPage page : document.getPages()) {
+      PDFont visibleFont = PDType1Font.HELVETICA_BOLD;  // font watermark hiện
+      int visibleFontSize = 7;                         // size hiện
 
-      // Create content stream in "append" mode
-      try (PDPageContentStream cs = new PDPageContentStream(
-          document, page,
-          PDPageContentStream.AppendMode.APPEND, true, true)) {
+      for (PDPage page : document.getPages()) {
 
-        // Set opacity to 0 (invisible) using extended graphics state
-        PDExtendedGraphicsState graphicsState = new PDExtendedGraphicsState();
-        graphicsState.setNonStrokingAlphaConstant(0f); // 0.0 = fully transparent, 1.0 = fully opaque
-        cs.setGraphicsStateParameters(graphicsState);
+          PDRectangle mediaBox = page.getMediaBox();
+          float pageWidth = mediaBox.getWidth();
+          float marginBottom = 30;
 
-        // Set transparency (alpha)
-        cs.setNonStrokingColor(0f, 0f, 0f); // 0 = invisible, 1 = solid
+          // ===========================
+          // TÍNH TÂM CHO TIMESTAMP
+          // ===========================
+          float textWidth = visibleFont.getStringWidth(visibleTimestamp) / 1000 * visibleFontSize;
+          float centerX = (pageWidth - textWidth) / 2;
 
-        // Get font metrics for vertical centering
-        // Use font descriptor if available, otherwise use estimated values
-        float textAscent = 0;
-        float textDescent = 0;
-        if (font.getFontDescriptor() != null) {
-          Float ascent = font.getFontDescriptor().getAscent();
-          Float descent = font.getFontDescriptor().getDescent();
-          if (ascent != null) {
-            textAscent = ascent / 1000 * fontSize;
+          // 1) VẼ TIMESTAMP HIỆN
+          try (PDPageContentStream cs = new PDPageContentStream(
+                  document, page,
+                  PDPageContentStream.AppendMode.APPEND, true, true)) {
+
+              float timestampWidth = visibleFont.getStringWidth(visibleTimestamp) / 1000 * visibleFontSize;
+              float timestampCenterX = (pageWidth - timestampWidth) / 2;
+
+              PDExtendedGraphicsState visibleState = new PDExtendedGraphicsState();
+              visibleState.setNonStrokingAlphaConstant(1f);
+              cs.setGraphicsStateParameters(visibleState);
+
+              cs.beginText();
+              cs.setFont(visibleFont, visibleFontSize);
+              cs.newLineAtOffset(timestampCenterX, marginBottom);
+              cs.showText(visibleTimestamp);
+              cs.endText();
           }
-          if (descent != null) {
-            textDescent = Math.abs(descent / 1000 * fontSize);
+
+          // 2) VẼ WATERMARK ẨN
+          try (PDPageContentStream csHidden = new PDPageContentStream(
+                  document, page,
+                  PDPageContentStream.AppendMode.APPEND, true, true)) {
+
+              float hiddenWidth = hiddenFont.getStringWidth(hiddenEmail) / 1000 * hiddenFontSize;
+              float hiddenCenterX = (pageWidth - hiddenWidth) / 2;
+
+              PDExtendedGraphicsState hiddenState = new PDExtendedGraphicsState();
+              hiddenState.setNonStrokingAlphaConstant(0.01f); // vô hình
+              csHidden.setGraphicsStateParameters(hiddenState);
+
+              csHidden.setNonStrokingColor(0f, 0f, 0f); // màu đen nhưng alpha=0 → vô hình
+
+              csHidden.beginText();
+              csHidden.setFont(hiddenFont, hiddenFontSize);
+              csHidden.newLineAtOffset(hiddenCenterX, marginBottom);
+              csHidden.showText(hiddenEmail);
+              csHidden.endText();
           }
-        }
 
-        // Fallback: if ascent/descent are not available, use estimated values
-        // For Helvetica Bold at 12pt: ascent ~8.8pt, descent ~2.2pt
-        if (textAscent == 0 && textDescent == 0) {
-          textAscent = fontSize * 0.73f; // Approximate ascent ratio for Helvetica
-          textDescent = fontSize * 0.18f; // Approximate descent ratio for Helvetica
-        }
-
-        // Begin text
-        cs.beginText();
-        cs.setFont(font, fontSize);
-
-        // To center rotated text properly:
-        // 1. Set rotation matrix around center point (this positions text baseline at
-        // center)
-        // 2. Then offset in the rotated coordinate space to center the text bounding
-        // box
-        cs.setTextMatrix(Matrix.getRotateInstance(Math.toRadians(0), 0, 0));
-
-        // Apply offset in the rotated coordinate space
-        cs.newLineAtOffset(0, 0);
-
-        cs.showText(watermarkText);
-        cs.endText();
       }
-    }
 
-    document.save(output);
-    System.out.println("Watermark applied successfully.");
-    return new ByteArrayInputStream(output.toByteArray());
+      document.save(output);
+      System.out.println("Watermark applied successfully.");
+      return new ByteArrayInputStream(output.toByteArray());
   }
 }
