@@ -191,25 +191,47 @@ public class BitstreamRestController {
           return ResponseEntity.ok().headers(httpHeaders).build();
         }
 
-        String waterMarkText = getUserWatermarkText(request.getParameter("authentication-token"));
-        String timeStamp = "Authorized licensed use limited to: Ho Chi Minh City University of Technology and Education (HCMUTE). Downloaded on " + Instant.now().toString();
-        // Add hidden watermark only to the first 5 pages of the file
-        // Add hidden watermark to the file
-        PDDocument document = PDDocument.load(bitstreamResource.getInputStream());
-        InputStream hiddenWatermarkedFile = PdfBoxUtils.addHiddenWatermark(document, waterMarkText, timeStamp);
-        InputStreamResource inputStreamResource = new InputStreamResource(hiddenWatermarkedFile);
-        document.close();
+        try {
+          boolean isPDF = mimetype.equals("application/pdf");
+          // Only process PDFs
+          if (isPDF) {
+            PDDocument document = PDDocument.load(bitstreamResource.getInputStream());
 
-        // Update the content length to the new length
-        httpHeadersInitializer.withLength(hiddenWatermarkedFile.available());
-        HttpHeaders newHeaders = httpHeadersInitializer.initialiseHeaders();
+            if (document != null && document.getNumberOfPages() > 0) {
+              String waterMarkText = getUserWatermarkText(request.getParameter("authentication-token"));
+              String timeStamp = "Authorized licensed use limited to: Ho Chi Minh City University of Technology and Education (HCMUTE). Downloaded on "
+                  + Instant.now().toString();
+              InputStream hiddenWatermarkedFile = PdfBoxUtils.addHiddenWatermark(document,
+                  waterMarkText, timeStamp);
+              InputStreamResource inputStreamResource = new InputStreamResource(hiddenWatermarkedFile);
+              document.close();
 
-        return ResponseEntity.ok().headers(newHeaders).body(inputStreamResource);
+              httpHeadersInitializer.withLength(hiddenWatermarkedFile.available());
+              HttpHeaders newHeaders = httpHeadersInitializer.initialiseHeaders();
+
+              return ResponseEntity.ok().headers(newHeaders).body(inputStreamResource);
+            }
+          }
+
+          // Not a PDF or invalid PDF, return original
+          return ResponseEntity.ok().headers(httpHeaders).body(bitstreamResource);
+
+        } catch (ClientAbortException ex) {
+          log.debug("Client aborted the request before the download was completed. " +
+              "Client is probably switching to a Range request.", ex);
+        } catch (Exception e) {
+          log.error("Error processing bitstream, returning original", e);
+          // Return original bitstream if processing fails
+          return ResponseEntity.ok().headers(httpHeaders).body(bitstreamResource);
+        }
       }
     } catch (ClientAbortException ex) {
+      System.out.println("Error processing bitstream, throw error in catch ClientAbortException" + ex.getMessage());
+
       log.debug("Client aborted the request before the download was completed. " +
           "Client is probably switching to a Range request.", ex);
     } catch (Exception e) {
+      System.out.println("Error processing bitstream, throw error in catch Exception" + e.getMessage());
       throw new RuntimeException(e);
     }
 
@@ -423,25 +445,24 @@ public class BitstreamRestController {
         HttpHeaders httpHeaders = httpHeadersInitializer.initialiseHeaders();
 
         if (RequestMethod.HEAD.name().equals(request.getMethod())) {
-            log.debug("HEAD request - no response body");
-            return ResponseEntity.ok().headers(httpHeaders).build();
+          log.debug("HEAD request - no response body");
+          return ResponseEntity.ok().headers(httpHeaders).build();
         }
 
         PDDocument originalDocument = PDDocument.load(bitstreamResource.getInputStream());
         int pageCount = originalDocument.getNumberOfPages();
         if (pageCount < 5) {
-            originalDocument.close();
-            return ResponseEntity.status(400).body("File must have at least 5 pages to preview");
+          originalDocument.close();
+          return ResponseEntity.status(400).body("File must have at least 5 pages to preview");
         }
 
         PDDocument document = getPreviewDocument(originalDocument);
 
         // --- Bỏ watermark ---
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        document.save(baos);  // Lưu PDF vào output stream
+        document.save(baos); // Lưu PDF vào output stream
         InputStream originalStream = new ByteArrayInputStream(baos.toByteArray());
         InputStreamResource inputStreamResource = new InputStreamResource(originalStream);
-
 
         originalDocument.close();
         document.close();
@@ -451,7 +472,7 @@ public class BitstreamRestController {
         HttpHeaders newHeaders = httpHeadersInitializer.initialiseHeaders();
 
         return ResponseEntity.ok().headers(newHeaders).body(inputStreamResource);
-    }
+      }
 
     } catch (ClientAbortException ex) {
       log.debug("Client aborted the request before the download was completed. " +
