@@ -48,6 +48,7 @@ import org.dspace.services.ConfigurationService;
 import org.dspace.services.EventService;
 import org.dspace.usage.UsageEvent;
 import org.dspace.util.PdfBoxUtils;
+import org.dspace.util.SteganographyDecoder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.data.rest.webmvc.ResourceNotFoundException;
@@ -198,18 +199,46 @@ public class BitstreamRestController {
             PDDocument document = PDDocument.load(bitstreamResource.getInputStream());
 
             if (document != null && document.getNumberOfPages() > 0) {
-              String waterMarkText = getUserWatermarkText(request.getParameter("authentication-token"));
-              String timeStamp = "Authorized licensed use limited to: Ho Chi Minh City University of Technology and Education (HCMUTE). Downloaded on "
+              // 1) Extract email (ổn định), KHÔNG kèm timestamp để hash không đổi theo lần tải
+              String authToken = request.getParameter("authentication-token");
+              String userEmail = extractUserEmail(authToken);  // hàm mới phía dưới
+              String emailForHash = (StringUtils.isNotBlank(userEmail)) ? userEmail : "anonymous";
+
+              // 2) Text watermark ẩn (có thể giữ nguyên format)
+              String watermarkHiddenText = "Downloaded by: " + emailForHash;
+
+              // 3) Watermark hiện như bạn yêu cầu
+              String visibleTimestamp = "Authorized licensed use limited to: Ho Chi Minh City University of Technology and Education (HCMUTE). Downloaded on "
                   + Instant.now().toString();
-              InputStream hiddenWatermarkedFile = PdfBoxUtils.addHiddenWatermark(document,
-                  waterMarkText, timeStamp);
-              InputStreamResource inputStreamResource = new InputStreamResource(hiddenWatermarkedFile);
+
+              // 4) addHiddenWatermark() giờ đã tự gọi thuật toán nhúng ảnh 2x2cm (trang 1)
+              InputStream watermarkedStream = PdfBoxUtils.addHiddenWatermark(document, watermarkHiddenText, visibleTimestamp);
+
+              // 5) Đọc ra byte[] để set content-length chuẩn (KHÔNG dùng available())
+              byte[] bytes = watermarkedStream.readAllBytes();
+              InputStreamResource inputStreamResource = new InputStreamResource(new ByteArrayInputStream(bytes));
+
               document.close();
 
-              httpHeadersInitializer.withLength(hiddenWatermarkedFile.available());
+
+              byte[] tempBytes = inputStreamResource.getInputStream().readAllBytes();
+              // Load the watermarked PDF
+              try (PDDocument doc = PDDocument.load(tempBytes)) {
+                  
+                // Extract the hidden hash
+                byte[] hiddenHash = SteganographyDecoder.extractHiddenHash(doc);
+                System.out.println("Extracted hash: " + SteganographyDecoder.toHex(hiddenHash));
+                
+                // Verify against a suspected email
+                String suspectedEmail = "admin@gmail.com";
+                boolean matches = SteganographyDecoder.verifyEmail(hiddenHash, suspectedEmail);
+                System.out.println("Email matches: " + matches);
+              }
+
+              httpHeadersInitializer.withLength(bytes.length);
               HttpHeaders newHeaders = httpHeadersInitializer.initialiseHeaders();
 
-              return ResponseEntity.ok().headers(newHeaders).body(inputStreamResource);
+              return ResponseEntity.ok().headers(newHeaders).body(new ByteArrayInputStream(bytes));
             }
           }
 
@@ -481,6 +510,16 @@ public class BitstreamRestController {
       throw new RuntimeException(e);
     }
     return null;
+  }
+  private String extractUserEmail(String token) {
+    if (StringUtils.isBlank(token)) return null;
+    try {
+      SignedJWT signedJWT = SignedJWT.parse(token);
+      JWTClaimsSet claims = signedJWT.getJWTClaimsSet();
+      return claims.getStringClaim("email");
+    } catch (Exception e) {
+      return null;
+    }
   }
 
   private PDDocument getPreviewDocument(PDDocument document) {
