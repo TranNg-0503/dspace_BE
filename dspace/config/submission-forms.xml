@@ -114,16 +114,17 @@
                     <required></required>
                 </field>
             </row>
-            <row>
+            <row>   
                 <field>
                     <dc-schema>dc</dc-schema>
                     <dc-element>identifier</dc-element>
                     <dc-qualifier>citation</dc-qualifier>
                     <repeatable>false</repeatable>
-                    <label>Citation</label>
+                    <label>Rent Price</label>
                     <input-type>onebox</input-type>
-                    <hint>Enter the standard citation for the previously issued instance of this item.</hint>
+                    <hint>Enter the rent price.</hint>
                     <required></required>
+                    <regex>^[0-9]+$</regex>
                 </field>
             </row>
             <row>
@@ -322,10 +323,11 @@
                     <dc-element>identifier</dc-element>
                     <dc-qualifier>citation</dc-qualifier>
                     <repeatable>false</repeatable>
-                    <label>Citation</label>
+                    <label>Rent Price</label>
                     <input-type>onebox</input-type>
-                    <hint>Enter the standard citation for the previously issued instance of this item.</hint>
+                    <hint>Enter the standard rent price.</hint>
                     <required></required>
+                    <regex>^[0-9]+$</regex>
                 </field>
             </row>
             <row>
