@@ -7,8 +7,11 @@
  */
 package org.dspace.app.rest;
 
+import static org.dspace.app.rest.utils.ContextUtil.obtainContext;
+import static org.dspace.app.rest.utils.RegexUtils.REGEX_REQUESTMAPPING_IDENTIFIER_AS_UUID;
+import static org.springframework.web.bind.annotation.RequestMethod.PUT;
+
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.sql.SQLException;
@@ -16,10 +19,10 @@ import java.text.ParseException;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.core.Response;
+import java.io.ByteArrayOutputStream;
 
 import org.apache.catalina.connector.ClientAbortException;
 import org.apache.commons.collections4.ListUtils;
@@ -31,9 +34,7 @@ import org.dspace.app.rest.exception.DSpaceBadRequestException;
 import org.dspace.app.rest.model.BitstreamRest;
 import org.dspace.app.rest.model.hateoas.BitstreamResource;
 import org.dspace.app.rest.utils.ContextUtil;
-import static org.dspace.app.rest.utils.ContextUtil.obtainContext;
 import org.dspace.app.rest.utils.HttpHeadersInitializer;
-import static org.dspace.app.rest.utils.RegexUtils.REGEX_REQUESTMAPPING_IDENTIFIER_AS_UUID;
 import org.dspace.app.rest.utils.Utils;
 import org.dspace.authorize.AuthorizeException;
 import org.dspace.content.Bitstream;
@@ -47,6 +48,9 @@ import org.dspace.services.ConfigurationService;
 import org.dspace.services.EventService;
 import org.dspace.usage.UsageEvent;
 import org.dspace.util.PdfBoxUtils;
+import org.dspace.app.rest.vnpay.VnpayPaymentService;
+import org.dspace.app.rest.vnpay.VnpayTransaction;
+import org.dspace.app.rest.vnpay.VnpayTransactionStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.data.rest.webmvc.ResourceNotFoundException;
@@ -57,7 +61,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
-import static org.springframework.web.bind.annotation.RequestMethod.PUT;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.nimbusds.jwt.JWTClaimsSet;
@@ -110,6 +113,9 @@ public class BitstreamRestController {
   ConverterService converter;
 
   @Autowired
+  private VnpayPaymentService vnpayPaymentService;
+
+  @Autowired
   Utils utils;
 
   @PreAuthorize("hasPermission(#uuid, 'BITSTREAM', 'READ')")
@@ -118,124 +124,134 @@ public class BitstreamRestController {
       HttpServletRequest request) throws IOException, SQLException, AuthorizeException {
 
     Context context = ContextUtil.obtainContext(request);
-
-    Bitstream bit = bitstreamService.find(context, uuid);
-    EPerson currentUser = context.getCurrentUser();
-
-    if (bit == null) {
-      response.sendError(HttpServletResponse.SC_NOT_FOUND);
-      return null;
-    }
-
-    Long lastModified = bitstreamService.getLastModified(bit);
-    BitstreamFormat format = bit.getFormat(context);
-    String mimetype = format.getMIMEType();
-    String name = getBitstreamName(bit, format);
-
-    if (StringUtils.isBlank(request.getHeader("Range"))) {
-      // We only log a download request when serving a request without Range header.
-      // This is because
-      // a browser always sends a regular request first to check for Range support.
-      eventService.fireEvent(
-          new UsageEvent(
-              UsageEvent.Action.VIEW,
-              request,
-              context,
-              bit));
-    }
-
     try {
-      long filesize = bit.getSizeBytes();
-      Boolean citationEnabledForBitstream = citationDocumentService.isCitationEnabledForBitstream(bit, context);
-
-      var bitstreamResource = new org.dspace.app.rest.utils.BitstreamResource(name, uuid,
-          currentUser != null ? currentUser.getID() : null,
-          context.getSpecialGroupUuids(), citationEnabledForBitstream);
-
-      HttpHeadersInitializer httpHeadersInitializer = new HttpHeadersInitializer()
-          .withBufferSize(BUFFER_SIZE)
-          .withFileName(name)
-          .withChecksum(bitstreamResource.getChecksum())
-          .withLength(bitstreamResource.contentLength())
-          .withMimetype(mimetype)
-          .with(request)
-          .with(response);
-
-      if (lastModified != null) {
-        httpHeadersInitializer.withLastModified(lastModified);
+      if (!isDownloadAuthorized(request, uuid, context)) {
+        response.sendError(HttpServletResponse.SC_FORBIDDEN, "Payment required or invalid transaction");
+        return null;
       }
 
-      // Determine if we need to send the file as a download or if the browser can
-      // open it inline
-      // The file will be downloaded if its size is larger than the configured
-      // threshold,
-      // or if its mimetype/extension appears in the
-      // "webui.content_disposition_format" config
-      long dispositionThreshold = configurationService.getLongProperty("webui.content_disposition_threshold");
-      if ((dispositionThreshold >= 0 && filesize > dispositionThreshold)
-          || checkFormatForContentDisposition(format)) {
-        httpHeadersInitializer.withDisposition(HttpHeadersInitializer.CONTENT_DISPOSITION_ATTACHMENT);
+      Bitstream bit = bitstreamService.find(context, uuid);
+      EPerson currentUser = context.getCurrentUser();
+
+      if (bit == null) {
+        response.sendError(HttpServletResponse.SC_NOT_FOUND);
+        return null;
       }
 
-      // We have all the data we need, close the connection to the database so that it
-      // doesn't stay open during
-      // download/streaming
-      context.complete();
+      Long lastModified = bitstreamService.getLastModified(bit);
+      BitstreamFormat format = bit.getFormat(context);
+      String mimetype = format.getMIMEType();
+      String name = getBitstreamName(bit, format);
 
-      // Send the data
-      if (httpHeadersInitializer.isValid()) {
-        HttpHeaders httpHeaders = httpHeadersInitializer.initialiseHeaders();
+      if (StringUtils.isBlank(request.getHeader("Range"))) {
+        // We only log a download request when serving a request without Range header.
+        // This is because
+        // a browser always sends a regular request first to check for Range support.
+        eventService.fireEvent(
+            new UsageEvent(
+                UsageEvent.Action.VIEW,
+                request,
+                context,
+                bit));
+      }
 
-        if (RequestMethod.HEAD.name().equals(request.getMethod())) {
-          log.debug("HEAD request - no response body");
-          return ResponseEntity.ok().headers(httpHeaders).build();
+      try {
+        long filesize = bit.getSizeBytes();
+        Boolean citationEnabledForBitstream = citationDocumentService.isCitationEnabledForBitstream(bit, context);
+
+        var bitstreamResource = new org.dspace.app.rest.utils.BitstreamResource(name, uuid,
+            currentUser != null ? currentUser.getID() : null,
+            context.getSpecialGroupUuids(), citationEnabledForBitstream);
+
+        HttpHeadersInitializer httpHeadersInitializer = new HttpHeadersInitializer()
+            .withBufferSize(BUFFER_SIZE)
+            .withFileName(name)
+            .withChecksum(bitstreamResource.getChecksum())
+            .withLength(bitstreamResource.contentLength())
+            .withMimetype(mimetype)
+            .with(request)
+            .with(response);
+
+        if (lastModified != null) {
+          httpHeadersInitializer.withLastModified(lastModified);
         }
 
-        try {
-          boolean isPDF = mimetype.equals("application/pdf");
-          // Only process PDFs
-          if (isPDF) {
-            PDDocument document = PDDocument.load(bitstreamResource.getInputStream());
+        // Determine if we need to send the file as a download or if the browser can
+        // open it inline
+        // The file will be downloaded if its size is larger than the configured
+        // threshold,
+        // or if its mimetype/extension appears in the
+        // "webui.content_disposition_format" config
+        long dispositionThreshold = configurationService.getLongProperty("webui.content_disposition_threshold");
+        if ((dispositionThreshold >= 0 && filesize > dispositionThreshold)
+            || checkFormatForContentDisposition(format)) {
+          httpHeadersInitializer.withDisposition(HttpHeadersInitializer.CONTENT_DISPOSITION_ATTACHMENT);
+        }
 
-            if (document != null && document.getNumberOfPages() > 0) {
-              String waterMarkText = getUserWatermarkText(request.getParameter("authentication-token"));
-              String timeStamp = "Authorized licensed use limited to: Ho Chi Minh City University of Technology and Engineering (HCMUTE). Downloaded on "
-                  + Instant.now().toString();
-              InputStream hiddenWatermarkedFile = PdfBoxUtils.addHiddenWatermark(document,
-                  waterMarkText, timeStamp);
-              InputStreamResource inputStreamResource = new InputStreamResource(hiddenWatermarkedFile);
-              document.close();
+        // We have all the data we need, close the connection to the database so that it
+        // doesn't stay open during
+        // download/streaming
+        context.complete();
 
-              httpHeadersInitializer.withLength(hiddenWatermarkedFile.available());
-              HttpHeaders newHeaders = httpHeadersInitializer.initialiseHeaders();
+        // Send the data
+        if (httpHeadersInitializer.isValid()) {
+          HttpHeaders httpHeaders = httpHeadersInitializer.initialiseHeaders();
 
-              return ResponseEntity.ok().headers(newHeaders).body(inputStreamResource);
-            }
+          if (RequestMethod.HEAD.name().equals(request.getMethod())) {
+            log.debug("HEAD request - no response body");
+            return ResponseEntity.ok().headers(httpHeaders).build();
           }
 
-          // Not a PDF or invalid PDF, return original
-          return ResponseEntity.ok().headers(httpHeaders).body(bitstreamResource);
+          try {
+            boolean isPDF = mimetype.equals("application/pdf");
+            // Only process PDFs
+            if (isPDF) {
+              PDDocument document = PDDocument.load(bitstreamResource.getInputStream());
 
-        } catch (ClientAbortException ex) {
-          log.debug("Client aborted the request before the download was completed. " +
-              "Client is probably switching to a Range request.", ex);
-        } catch (Exception e) {
-          log.error("Error processing bitstream, returning original", e);
-          // Return original bitstream if processing fails
-          return ResponseEntity.ok().headers(httpHeaders).body(bitstreamResource);
+              if (document != null && document.getNumberOfPages() > 0) {
+                String waterMarkText = getUserWatermarkText(request.getParameter("authentication-token"));
+                String timeStamp = "Authorized licensed use limited to: Ho Chi Minh City University of Technology and Education (HCMUTE). Downloaded on "
+                    + Instant.now().toString();
+                InputStream hiddenWatermarkedFile = PdfBoxUtils.addHiddenWatermark(document,
+                    waterMarkText, timeStamp);
+                InputStreamResource inputStreamResource = new InputStreamResource(hiddenWatermarkedFile);
+                document.close();
+
+                httpHeadersInitializer.withLength(hiddenWatermarkedFile.available());
+                HttpHeaders newHeaders = httpHeadersInitializer.initialiseHeaders();
+
+                return ResponseEntity.ok().headers(newHeaders).body(inputStreamResource);
+              }
+            }
+
+            // Not a PDF or invalid PDF, return original
+            return ResponseEntity.ok().headers(httpHeaders).body(bitstreamResource);
+
+          } catch (ClientAbortException ex) {
+            log.debug("Client aborted the request before the download was completed. " +
+                "Client is probably switching to a Range request.", ex);
+          } catch (Exception e) {
+            log.error("Error processing bitstream, returning original", e);
+            // Return original bitstream if processing fails
+            return ResponseEntity.ok().headers(httpHeaders).body(bitstreamResource);
+          }
         }
+      } catch (ClientAbortException ex) {
+        System.out.println("Error processing bitstream, throw error in catch ClientAbortException" + ex.getMessage());
+
+        log.debug("Client aborted the request before the download was completed. " +
+            "Client is probably switching to a Range request.", ex);
+      } catch (Exception e) {
+        System.out.println("Error processing bitstream, throw error in catch Exception" + e.getMessage());
+        throw new RuntimeException(e);
       }
-    } catch (ClientAbortException ex) {
-      System.out.println("Error processing bitstream, throw error in catch ClientAbortException" + ex.getMessage());
 
-      log.debug("Client aborted the request before the download was completed. " +
-          "Client is probably switching to a Range request.", ex);
-    } catch (Exception e) {
-      System.out.println("Error processing bitstream, throw error in catch Exception" + e.getMessage());
-      throw new RuntimeException(e);
+      return null;
+    } finally {
+      if (context != null && context.isValid()) {
+        context.complete();
+      }
     }
-
-    return null;
   }
 
   private String getBitstreamName(Bitstream bit, BitstreamFormat format) {
@@ -491,5 +507,24 @@ public class BitstreamRestController {
       previewDocument.addPage(document.getPage(i));
     }
     return previewDocument;
+  }
+
+  private boolean isDownloadAuthorized(HttpServletRequest request, UUID uuid, Context context) {
+    String transactionId = request.getParameter("transactionId");
+    if (StringUtils.isBlank(transactionId)) {
+      return true;
+    }
+
+    try {
+      VnpayTransaction transaction = vnpayPaymentService.getTransaction(context, transactionId);
+      if (transaction == null) {
+        return false;
+      }
+      return transaction.getStatus() == VnpayTransactionStatus.SUCCESS
+          && uuid.toString().equals(transaction.getBitstreamId());
+    } catch (Exception e) {
+      log.error("Unable to validate VNPAY transaction for download", e);
+      return false;
+    }
   }
 }
