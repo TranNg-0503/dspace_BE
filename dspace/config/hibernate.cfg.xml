@@ -93,6 +93,7 @@
         <mapping class="org.dspace.orcid.OrcidQueue" />
         <mapping class="org.dspace.orcid.OrcidHistory" />
         <mapping class="org.dspace.orcid.OrcidToken"/>
+        <mapping class="org.dspace.app.rest.vnpay.VnpayTransaction"/>
 
         <mapping class="org.dspace.supervision.SupervisionOrder"/>
 
