@@ -28,6 +28,7 @@ import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
+import org.dspace.app.rest.vnpay.dao.VnpayTransactionDAO;
 import org.dspace.core.Context;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -41,12 +42,15 @@ public class VnpayPaymentService {
     private final String vnpUrl;
     private final String vnpTmnCode;
     private final String vnpHashSecret;
+    private final VnpayTransactionDAO vnpayTransactionDAO;
 
     public VnpayPaymentService(
+        VnpayTransactionDAO vnpayTransactionDAO,
         @Value("${vnpay.url:https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}") String vnpUrl,
         @Value("${vnpay.tmn-code:A1YS13CE}") String vnpTmnCode,
         @Value("${vnpay.hash-secret:F1YSSATU9UCJ709ZFBEH9E4TKSLNVCRM}") String vnpHashSecret
     ) {
+        this.vnpayTransactionDAO = vnpayTransactionDAO;
         this.vnpUrl = vnpUrl;
         this.vnpTmnCode = vnpTmnCode;
         this.vnpHashSecret = vnpHashSecret;
@@ -66,8 +70,7 @@ public class VnpayPaymentService {
         transaction.setStatus(VnpayTransactionStatus.PENDING);
         transaction.setCreatedAt(new Date());
 
-        // TODO: persist transaction later
-        return transaction;
+        return vnpayTransactionDAO.create(context, transaction);
     }
 
     public String buildPaymentUrl(VnpayTransaction transaction, String clientIpAddress) {
@@ -101,8 +104,8 @@ public class VnpayPaymentService {
     }
 
     public VnpayTransaction getTransaction(Context context, String transactionId) throws SQLException {
-    return null;
-}
+        return vnpayTransactionDAO.findByTransactionId(context, transactionId);
+    }
 
     public boolean verifyVnpaySecureHash(Map<String, String> queryParams) {
         String secureHash = queryParams.get("vnp_SecureHash");
@@ -126,7 +129,8 @@ public class VnpayPaymentService {
         return secureHash.equalsIgnoreCase(expectedHash);
     }
 
-    public VnpayTransaction updateTransactionStatus(Context context, Map<String, String> queryParams) throws SQLException {
+    public VnpayTransaction updateTransactionStatus(Context context, Map<String, String> queryParams)
+        throws SQLException {
         String txnRef = queryParams.get("vnp_TxnRef");
         if (txnRef == null) {
             return null;
@@ -138,10 +142,11 @@ public class VnpayPaymentService {
         }
 
         if (!verifyVnpaySecureHash(queryParams)) {
-    transaction.setStatus(VnpayTransactionStatus.FAILED);
-    transaction.setResponseCode(queryParams.get("vnp_ResponseCode"));
-    return transaction;
-}
+            transaction.setStatus(VnpayTransactionStatus.FAILED);
+            transaction.setResponseCode(queryParams.get("vnp_ResponseCode"));
+            vnpayTransactionDAO.save(context, transaction);
+            return transaction;
+        }
 
         String responseCode = queryParams.get("vnp_ResponseCode");
         transaction.setResponseCode(responseCode);
@@ -155,7 +160,7 @@ public class VnpayPaymentService {
             transaction.setStatus(VnpayTransactionStatus.FAILED);
         }
 
-
+        vnpayTransactionDAO.save(context, transaction);
         return transaction;
     }
 

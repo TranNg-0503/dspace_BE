@@ -9,6 +9,7 @@
     <!-- **************** -->
     <bean class="org.dspace.app.requestitem.dao.impl.RequestItemDAOImpl"/>
     <bean class="org.dspace.app.util.dao.impl.WebAppDAOImpl"/>
+    <bean class="org.dspace.app.rest.vnpay.dao.impl.VnpayTransactionDAOImpl"/>
 
     <bean class="org.dspace.authorize.dao.impl.ResourcePolicyDAOImpl"/>
 
