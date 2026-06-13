@@ -7,11 +7,8 @@
  */
 package org.dspace.app.rest;
 
-import static org.dspace.app.rest.utils.ContextUtil.obtainContext;
-import static org.dspace.app.rest.utils.RegexUtils.REGEX_REQUESTMAPPING_IDENTIFIER_AS_UUID;
-import static org.springframework.web.bind.annotation.RequestMethod.PUT;
-
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.sql.SQLException;
@@ -19,10 +16,10 @@ import java.text.ParseException;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.core.Response;
-import java.io.ByteArrayOutputStream;
 
 import org.apache.catalina.connector.ClientAbortException;
 import org.apache.commons.collections4.ListUtils;
@@ -34,8 +31,13 @@ import org.dspace.app.rest.exception.DSpaceBadRequestException;
 import org.dspace.app.rest.model.BitstreamRest;
 import org.dspace.app.rest.model.hateoas.BitstreamResource;
 import org.dspace.app.rest.utils.ContextUtil;
+import static org.dspace.app.rest.utils.ContextUtil.obtainContext;
 import org.dspace.app.rest.utils.HttpHeadersInitializer;
+import static org.dspace.app.rest.utils.RegexUtils.REGEX_REQUESTMAPPING_IDENTIFIER_AS_UUID;
 import org.dspace.app.rest.utils.Utils;
+import org.dspace.app.rest.vnpay.VnpayPaymentService;
+import org.dspace.app.rest.vnpay.VnpayTransaction;
+import org.dspace.app.rest.vnpay.VnpayTransactionStatus;
 import org.dspace.authorize.AuthorizeException;
 import org.dspace.content.Bitstream;
 import org.dspace.content.BitstreamFormat;
@@ -48,9 +50,6 @@ import org.dspace.services.ConfigurationService;
 import org.dspace.services.EventService;
 import org.dspace.usage.UsageEvent;
 import org.dspace.util.PdfBoxUtils;
-import org.dspace.app.rest.vnpay.VnpayPaymentService;
-import org.dspace.app.rest.vnpay.VnpayTransaction;
-import org.dspace.app.rest.vnpay.VnpayTransactionStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.data.rest.webmvc.ResourceNotFoundException;
@@ -61,6 +60,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
+import static org.springframework.web.bind.annotation.RequestMethod.PUT;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.nimbusds.jwt.JWTClaimsSet;
@@ -210,7 +210,7 @@ public class BitstreamRestController {
 
               if (document != null && document.getNumberOfPages() > 0) {
                 String waterMarkText = getUserWatermarkText(request.getParameter("authentication-token"));
-                String timeStamp = "Authorized licensed use limited to: Ho Chi Minh City University of Technology and Education (HCMUTE). Downloaded on "
+                String timeStamp = "Authorized licensed use limited to: Ho Chi Minh City University of Technology and Engineering (HCMUTE). Downloaded on "
                     + Instant.now().toString();
                 InputStream hiddenWatermarkedFile = PdfBoxUtils.addHiddenWatermark(document,
                     waterMarkText, timeStamp);
