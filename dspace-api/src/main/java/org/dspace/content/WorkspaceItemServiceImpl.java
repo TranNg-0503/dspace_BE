@@ -122,6 +122,9 @@ public class WorkspaceItemServiceImpl implements WorkspaceItemService {
         }
         item.setSubmitter(context.getCurrentUser());
 
+
+       
+
         // Now create the policies for the submitter to modify item and contents
         // contents = bitstreams, bundles
         // read permission
@@ -139,6 +142,21 @@ public class WorkspaceItemServiceImpl implements WorkspaceItemService {
 
         // Copy template if appropriate
         itemService.populateWithTemplateItemMetadata(context, collection, template, item);
+
+         // Auto set publisher from collection name
+        itemService.addMetadata(
+            context,
+            item,
+            "dc",
+            "publisher",
+            null,
+            null,
+            collection.getName(),
+            null,
+            -1,
+            0
+        );
+
 
         itemService.update(context, item);
 
