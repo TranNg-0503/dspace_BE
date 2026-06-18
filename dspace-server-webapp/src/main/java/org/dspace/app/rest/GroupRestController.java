@@ -7,14 +7,6 @@
  */
 package org.dspace.app.rest;
 
-import static java.util.regex.Pattern.compile;
-import static org.apache.http.HttpStatus.SC_NO_CONTENT;
-import static org.apache.http.HttpStatus.SC_UNPROCESSABLE_ENTITY;
-import static org.dspace.app.rest.utils.ContextUtil.obtainContext;
-import static org.dspace.app.rest.utils.RegexUtils.REGEX_UUID;
-import static org.springframework.web.bind.annotation.RequestMethod.DELETE;
-import static org.springframework.web.bind.annotation.RequestMethod.POST;
-
 import java.io.IOException;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -23,11 +15,17 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import static java.util.regex.Pattern.compile;
+
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import static org.apache.http.HttpStatus.SC_NO_CONTENT;
+import static org.apache.http.HttpStatus.SC_UNPROCESSABLE_ENTITY;
 import org.dspace.app.rest.exception.UnprocessableEntityException;
 import org.dspace.app.rest.model.GroupRest;
+import static org.dspace.app.rest.utils.ContextUtil.obtainContext;
+import static org.dspace.app.rest.utils.RegexUtils.REGEX_UUID;
 import org.dspace.app.rest.utils.Utils;
 import org.dspace.app.util.AuthorizeUtil;
 import org.dspace.authorize.AuthorizeException;
@@ -41,7 +39,11 @@ import org.springframework.data.rest.webmvc.ResourceNotFoundException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import static org.springframework.web.bind.annotation.RequestMethod.DELETE;
+import static org.springframework.web.bind.annotation.RequestMethod.POST;
 import org.springframework.web.bind.annotation.RestController;
+
+
 
 /**
  * This will be the entry point for the api/eperson/groups endpoint with additional paths to it
@@ -154,6 +156,28 @@ public class GroupRestController {
         }
 
         for (EPerson member : members) {
+
+            String groupName = parentGroup.getName();
+
+                if (groupName != null && groupName.matches("^COLLECTION_.*_SUBMIT$")) {
+
+                    List<Group> userGroups = groupService.allMemberGroups(context, member);
+
+                    for (Group g : userGroups) {
+
+                        String existingGroupName = g.getName();
+
+                        if (existingGroupName != null
+                                && existingGroupName.matches("^COLLECTION_.*_SUBMIT$")
+                                && !g.getID().equals(parentGroup.getID())) {
+
+                            throw new UnprocessableEntityException(
+                                "User is already submitter of another collection"
+                            );
+                        }
+                    }
+                }
+
             groupService.addMember(context, parentGroup, member);
         }
 
@@ -245,4 +269,7 @@ public class GroupRestController {
 
         response.setStatus(SC_NO_CONTENT);
     }
+
+
+   
 }
