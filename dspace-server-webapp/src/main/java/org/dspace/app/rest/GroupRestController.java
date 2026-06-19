@@ -29,6 +29,10 @@ import static org.dspace.app.rest.utils.RegexUtils.REGEX_UUID;
 import org.dspace.app.rest.utils.Utils;
 import org.dspace.app.util.AuthorizeUtil;
 import org.dspace.authorize.AuthorizeException;
+import org.dspace.content.Collection;
+import org.dspace.content.Community;
+import org.dspace.content.DSpaceObject;
+import org.dspace.content.service.CollectionService;
 import org.dspace.core.Context;
 import org.dspace.eperson.EPerson;
 import org.dspace.eperson.Group;
@@ -42,8 +46,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import static org.springframework.web.bind.annotation.RequestMethod.DELETE;
 import static org.springframework.web.bind.annotation.RequestMethod.POST;
 import org.springframework.web.bind.annotation.RestController;
-
-
 
 /**
  * This will be the entry point for the api/eperson/groups endpoint with additional paths to it
@@ -60,6 +62,9 @@ public class GroupRestController {
 
     @Autowired
     Utils utils;
+
+    @Autowired
+    private CollectionService collectionService;
 
     /**
      * Method to add one or more subgroups to a group.
@@ -122,6 +127,24 @@ public class GroupRestController {
         return !groupService.isParentOf(context, childGroup, parentGroup);
     }
 
+    private Collection findCollectionBySubmitterGroup(Context context, Group group)
+            throws SQLException {
+
+        List<Collection> collections = collectionService.findAll(context);
+
+        for (Collection col : collections) {
+
+            Group submitters = col.getSubmitters();
+
+            if (submitters != null
+                    && submitters.getID().equals(group.getID())) {
+                return col;
+            }
+        }
+
+        return null;
+    }
+
     /**
      * Method to add one or more members to a group.
      * The members to be added should be provided in the request body as a uri-list.
@@ -161,22 +184,60 @@ public class GroupRestController {
 
                 if (groupName != null && groupName.matches("^COLLECTION_.*_SUBMIT$")) {
 
-                    List<Group> userGroups = groupService.allMemberGroups(context, member);
+    Collection targetCollection =
+            findCollectionBySubmitterGroup(context, parentGroup);
 
-                    for (Group g : userGroups) {
+    if (targetCollection != null) {
 
-                        String existingGroupName = g.getName();
+        DSpaceObject targetParent =
+                collectionService.getParentObject(context, targetCollection);
 
-                        if (existingGroupName != null
-                                && existingGroupName.matches("^COLLECTION_.*_SUBMIT$")
-                                && !g.getID().equals(parentGroup.getID())) {
+        Community targetCommunity = null;
 
-                            throw new UnprocessableEntityException(
-                                "User is already submitter of another collection"
-                            );
-                        }
+        if (targetParent instanceof Community) {
+            targetCommunity = (Community) targetParent;
+}
+        List<Group> userGroups =
+                groupService.allMemberGroups(context, member);
+
+        for (Group g : userGroups) {
+
+            if (g.getID().equals(parentGroup.getID())) {
+                continue;
+            }
+
+            String existingGroupName = g.getName();
+
+            if (existingGroupName != null
+                    && existingGroupName.matches("^COLLECTION_.*_SUBMIT$")) {
+
+                Collection existingCollection =
+                        findCollectionBySubmitterGroup(context, g);
+
+                if (existingCollection != null) {
+
+                    DSpaceObject existingParent =
+                            collectionService.getParentObject(context, existingCollection);
+
+                    Community existingCommunity = null;
+
+                    if (existingParent instanceof Community) {
+                        existingCommunity = (Community) existingParent;
+                    }
+
+                    if (existingCommunity != null
+                            && targetCommunity != null
+                            && existingCommunity.getID().equals(targetCommunity.getID())) {
+
+                        throw new UnprocessableEntityException(
+                            "User is already submitter in another collection of this community"
+                        );
                     }
                 }
+            }
+        }
+    }
+}
 
             groupService.addMember(context, parentGroup, member);
         }
