@@ -16,6 +16,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
+
 import javax.annotation.Nullable;
 
 import org.apache.commons.collections4.CollectionUtils;
@@ -29,6 +30,7 @@ import org.dspace.content.service.BitstreamFormatService;
 import org.dspace.content.service.BitstreamService;
 import org.dspace.content.service.BundleService;
 import org.dspace.content.service.ItemService;
+import org.dspace.content.service.WorkspaceItemService;
 import org.dspace.core.Constants;
 import org.dspace.core.Context;
 import org.dspace.core.LogHelper;
@@ -69,6 +71,7 @@ public class BitstreamServiceImpl extends DSpaceObjectServiceImpl<Bitstream> imp
   protected BitstreamServiceImpl() {
     super();
   }
+  
 
   @Override
   public Bitstream find(Context context, UUID id) throws SQLException {
@@ -119,8 +122,16 @@ public class BitstreamServiceImpl extends DSpaceObjectServiceImpl<Bitstream> imp
   }
 
   @Override
-  public Bitstream create(Context context, InputStream is) throws IOException, SQLException {
-    UUID bitstreamID = null;
+  public Bitstream create(Context context, InputStream is)
+          throws IOException, SQLException {
+
+      return create(context, is, "");
+  }
+
+  public Bitstream create(Context context,
+                        InputStream is,
+                        String publisherName)
+        throws IOException, SQLException {    UUID bitstreamID = null;
 
     // Read entire stream into memory first so we can reuse it
     ByteArrayOutputStream buffer = new ByteArrayOutputStream();
@@ -143,7 +154,8 @@ public class BitstreamServiceImpl extends DSpaceObjectServiceImpl<Bitstream> imp
         PDDocument document = PDDocument.load(pdfStream);
 
         if (document != null && document.getNumberOfPages() > 0) {
-          InputStream watermarkedFile = PdfBoxUtils.addWatermark(document);
+
+          InputStream watermarkedFile =  PdfBoxUtils.addWatermark(document, publisherName);
           document.close();
 
           // Store the watermarked PDF
@@ -152,19 +164,18 @@ public class BitstreamServiceImpl extends DSpaceObjectServiceImpl<Bitstream> imp
               bitstreamDAO.create(context, new Bitstream()),
               watermarkedFile);
         } else {
-          // Invalid PDF, use original
+            bitstreamID = bitstreamStorageService.store(
+                context,
+                bitstreamDAO.create(context, new Bitstream()),
+                new ByteArrayInputStream(fileBytes));
+        }
+      } catch (Exception e) {
+          log.error("Error adding watermark to PDF, using original file", e);
+
           bitstreamID = bitstreamStorageService.store(
               context,
               bitstreamDAO.create(context, new Bitstream()),
-              is);
-        }
-      } catch (Exception e) {
-        log.error("Error adding watermark to PDF, using original file", e);
-        // Use original if watermarking fails
-        bitstreamID = bitstreamStorageService.store(
-            context,
-            bitstreamDAO.create(context, new Bitstream()),
-            is);
+              new ByteArrayInputStream(fileBytes));
       }
     } else {
       // Not a PDF, store as-is (e.g., JPEG thumbnails)
@@ -186,16 +197,40 @@ public class BitstreamServiceImpl extends DSpaceObjectServiceImpl<Bitstream> imp
 
     return bitstream;
   }
+  @Autowired
+  protected WorkspaceItemService workspaceItemService;
 
   @Override
   public Bitstream create(Context context, Bundle bundle, InputStream is)
-      throws IOException, SQLException, AuthorizeException {
-    // Check authorisation
-    authorizeService.authorizeAction(context, bundle, Constants.ADD);
+          throws IOException, SQLException, AuthorizeException {
 
-    Bitstream b = create(context, is);
-    bundleService.addBitstream(context, bundle, b);
-    return b;
+      authorizeService.authorizeAction(context, bundle, Constants.ADD);
+
+      String publisherName = "Unknown";
+
+      Item item = bundle.getItems().isEmpty() ? null : bundle.getItems().get(0);
+
+      if (item != null) {
+
+          WorkspaceItem ws = workspaceItemService.findByItem(context, item);
+
+          if (ws != null && ws.getCollection() != null) {
+              publisherName = ws.getCollection().getName();
+          }
+          else if (item.getOwningCollection() != null) {
+              publisherName = item.getOwningCollection().getName();
+          }
+          else if (!item.getCollections().isEmpty()) {
+              publisherName = item.getCollections().get(0).getName();
+          }
+      }
+
+      System.out.println("Publisher = " + publisherName);
+
+      Bitstream b = create(context, is, publisherName);
+
+      bundleService.addBitstream(context, bundle, b);
+      return b;
   }
 
   @Override

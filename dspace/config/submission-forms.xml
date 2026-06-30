@@ -314,7 +314,8 @@
                     <label>Rent Price</label>
                     <input-type>onebox</input-type>
                     <hint>Enter the standard rent price.</hint>
-                    <required></required>
+                    <required>yes</required>
+                    <hint>Vui lòng nhập giá thuê</hint>
                     <regex>^[0-9]+$</regex>
                 </field>
             </row>

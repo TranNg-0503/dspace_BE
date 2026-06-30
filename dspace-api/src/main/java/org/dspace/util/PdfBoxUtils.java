@@ -15,10 +15,18 @@ import org.apache.pdfbox.util.Matrix;
 
 public class PdfBoxUtils {
 
-  public static InputStream addWatermark(PDDocument document) throws Exception {
+  public static InputStream addWatermark(
+        PDDocument document,
+        String publisherName) throws Exception {
+
     ByteArrayOutputStream output = new ByteArrayOutputStream();
 
-    String watermarkText = "HCMUTE - CONFIDENTIAL";
+    if (publisherName == null || publisherName.trim().isEmpty()) {
+        publisherName = "HCMUTE";
+    }
+
+    String watermarkText = publisherName;
+
     PDFont font = PDType1Font.HELVETICA_BOLD;
     int fontSize = 60;
 
@@ -75,7 +83,8 @@ public class PdfBoxUtils {
   public static InputStream addHiddenWatermark(
           PDDocument document,
           String hiddenEmail,          // watermark ẩn
-          String visibleTimestamp      // watermark hiện
+          String visibleTimestamp,      // watermark hiện
+          String visibleTimestamp2
   ) throws Exception {
 
       ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -96,26 +105,51 @@ public class PdfBoxUtils {
           // TÍNH TÂM CHO TIMESTAMP
           // ===========================
           float textWidth = visibleFont.getStringWidth(visibleTimestamp) / 1000 * visibleFontSize;
+          float textWidth2 = visibleFont.getStringWidth(visibleTimestamp2) / 1000 * visibleFontSize;
+
           float centerX = (pageWidth - textWidth) / 2;
 
           // 1) VẼ TIMESTAMP HIỆN
           try (PDPageContentStream cs = new PDPageContentStream(
-                  document, page,
-                  PDPageContentStream.AppendMode.APPEND, true, true)) {
+              document, page,
+              PDPageContentStream.AppendMode.APPEND, true, true)) {
 
-              float timestampWidth = visibleFont.getStringWidth(visibleTimestamp) / 1000 * visibleFontSize;
-              float timestampCenterX = (pageWidth - timestampWidth) / 2;
+          float timestampWidth =
+                  visibleFont.getStringWidth(visibleTimestamp)
+                          / 1000 * visibleFontSize;
 
-              PDExtendedGraphicsState visibleState = new PDExtendedGraphicsState();
-              visibleState.setNonStrokingAlphaConstant(1f);
-              cs.setGraphicsStateParameters(visibleState);
+          float timestampWidth2 =
+                  visibleFont.getStringWidth(visibleTimestamp2)
+                          / 1000 * visibleFontSize;
 
-              cs.beginText();
-              cs.setFont(visibleFont, visibleFontSize);
-              cs.newLineAtOffset(timestampCenterX, marginBottom);
-              cs.showText(visibleTimestamp);
-              cs.endText();
-          }
+          float timestampCenterX =
+                  (pageWidth - timestampWidth) / 2;
+
+          float timestampCenterX2 =
+                  (pageWidth - timestampWidth2) / 2;
+
+          PDExtendedGraphicsState visibleState =
+                  new PDExtendedGraphicsState();
+          visibleState.setNonStrokingAlphaConstant(1f);
+
+          cs.setGraphicsStateParameters(visibleState);
+
+          cs.beginText();
+          cs.setFont(visibleFont, visibleFontSize);
+
+          // Dòng 1
+          cs.newLineAtOffset(timestampCenterX, marginBottom + 8);
+          cs.showText(visibleTimestamp);
+
+          // Dòng 2 (xuống dưới 10 đơn vị)
+          cs.newLineAtOffset(
+                  timestampCenterX2 - timestampCenterX,
+                  -10);
+
+          cs.showText(visibleTimestamp2);
+
+          cs.endText();
+      }
 
           // 2) VẼ WATERMARK ẨN
           try (PDPageContentStream csHidden = new PDPageContentStream(
@@ -133,7 +167,7 @@ public class PdfBoxUtils {
 
               csHidden.beginText();
               csHidden.setFont(hiddenFont, hiddenFontSize);
-              csHidden.newLineAtOffset(hiddenCenterX, marginBottom);
+              csHidden.newLineAtOffset(hiddenCenterX, marginBottom + 8);
               csHidden.showText(hiddenEmail);
               csHidden.endText();
           }
