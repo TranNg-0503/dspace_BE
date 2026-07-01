@@ -2,6 +2,7 @@ package org.dspace.util;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.InputStream;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -9,7 +10,7 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDFont;
-import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.PDType0Font;
 import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
 import org.apache.pdfbox.util.Matrix;
 
@@ -27,7 +28,9 @@ public class PdfBoxUtils {
 
     String watermarkText = publisherName;
 
-    PDFont font = PDType1Font.HELVETICA_BOLD;
+    PDFont font = PDType0Font.load(
+        document,
+        new File("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"));
     int fontSize = 60;
 
     for (PDPage page : document.getPages()) {
@@ -89,10 +92,14 @@ public class PdfBoxUtils {
 
       ByteArrayOutputStream output = new ByteArrayOutputStream();
 
-      PDFont hiddenFont = PDType1Font.HELVETICA_BOLD;  // font watermark ẩn
+      PDFont hiddenFont = PDType0Font.load(
+        document,
+        new File("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"));  // font watermark ẩn
       int hiddenFontSize = 1;                           // giữ nguyên size cũ
 
-      PDFont visibleFont = PDType1Font.HELVETICA_BOLD;  // font watermark hiện
+      PDFont visibleFont = PDType0Font.load(
+        document,
+        new File("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"));  // font watermark hiện
       int visibleFontSize = 7;                         // size hiện
 
       for (PDPage page : document.getPages()) {

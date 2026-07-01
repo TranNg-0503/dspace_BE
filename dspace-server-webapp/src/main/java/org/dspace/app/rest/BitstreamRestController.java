@@ -41,7 +41,8 @@
   import org.dspace.app.rest.vnpay.VnpayTransaction;
   import org.dspace.app.rest.vnpay.VnpayTransactionStatus;
   import org.dspace.authorize.AuthorizeException;
-  import org.dspace.content.Bitstream;
+import org.dspace.authorize.service.AuthorizeService;
+import org.dspace.content.Bitstream;
   import org.dspace.content.BitstreamFormat;
   import org.dspace.content.Bundle;
   import org.dspace.content.Item;
@@ -100,6 +101,8 @@
 
     @Autowired
     private BitstreamService bitstreamService;
+    @Autowired
+    private AuthorizeService authorizeService;
 
     @Autowired
     BitstreamFormatService bitstreamFormatService;
@@ -451,6 +454,7 @@
 
       Bitstream bit = bitstreamService.find(context, uuid);
       EPerson currentUser = context.getCurrentUser();
+      boolean isAdmin = authorizeService.isAdmin(context);
 
       if (bit == null) {
         response.sendError(HttpServletResponse.SC_NOT_FOUND);
@@ -522,13 +526,23 @@
           }
 
           PDDocument originalDocument = PDDocument.load(bitstreamResource.getInputStream());
-          int pageCount = originalDocument.getNumberOfPages();
-          if (pageCount < 5) {
-            originalDocument.close();
-            return ResponseEntity.status(400).body("File must have at least 5 pages to preview");
-          }
 
-          PDDocument document = getPreviewDocument(originalDocument);
+          PDDocument document;
+
+          if (isAdmin) {
+              // Admin xem toàn bộ PDF
+              document = originalDocument;
+          } else {
+
+              int pageCount = originalDocument.getNumberOfPages();
+
+              if (pageCount < 5) {
+                  originalDocument.close();
+                  return ResponseEntity.status(400).body("File must have at least 5 pages to preview");
+              }
+
+              document = getPreviewDocument(originalDocument);
+          }
 
           // --- Bỏ watermark ---
           ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -536,7 +550,9 @@
           InputStream originalStream = new ByteArrayInputStream(baos.toByteArray());
           InputStreamResource inputStreamResource = new InputStreamResource(originalStream);
 
-          originalDocument.close();
+          if (document != originalDocument) {
+              originalDocument.close();
+          }
           document.close();
 
           // Update the content length
