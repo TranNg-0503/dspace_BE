@@ -31,7 +31,6 @@ public class PdfBoxUtils {
     PDFont font = PDType0Font.load(
         document,
         new File("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"));
-    int fontSize = 60;
 
     for (PDPage page : document.getPages()) {
 
@@ -42,39 +41,66 @@ public class PdfBoxUtils {
 
         // Set opacity to 0.3 using extended graphics state
         PDExtendedGraphicsState graphicsState = new PDExtendedGraphicsState();
-        graphicsState.setNonStrokingAlphaConstant(0.3f); // 0.0 = fully transparent, 1.0 = fully opaque
+        graphicsState.setNonStrokingAlphaConstant(0.18f);
         cs.setGraphicsStateParameters(graphicsState);
 
         // Set transparency (alpha)
         cs.setNonStrokingColor(0f, 0f, 0f); // 0 = invisible, 1 = solid
 
-        // Example: rotate around center of page
-        float pageWidth = page.getMediaBox().getWidth();
-        float pageHeight = page.getMediaBox().getHeight();
+       
 
-        // Calculate text width and height
-        float textWidth = font.getStringWidth(watermarkText) / 1000 * fontSize;
-        float textHeight = font.getFontDescriptor().getFontBoundingBox().getHeight() / 1000 * fontSize;
+        // Kích thước trang
+        PDRectangle mediaBox = page.getMediaBox();
+        float pageWidth = mediaBox.getWidth();
+        float pageHeight = mediaBox.getHeight();
 
-        // Calculate center position
-        float centerX = pageWidth / 2;
-        float centerY = pageHeight / 2;
+        // Font nhỏ hơn
+        int fontSize = 22;
+        if (publisherName.length() > 22)
+          fontSize = 18;
+      else
+          fontSize = 22;
 
-        // Begin text
+        // Góc xoay
+        double angle = Math.toRadians(30);
+
+        // Chiều rộng và chiều cao text
+        float textWidth =
+                font.getStringWidth(watermarkText) / 1000 * fontSize;
+
+        float textHeight =
+                font.getFontDescriptor()
+                    .getCapHeight() / 1000 * fontSize;
+
+        // ===== TÍNH TOÁN ĐỂ KHÔNG BỊ CẮT =====
+
+        // Chừa lề trái
+        float marginLeft = 35;
+
+        // Chiều cao mà text chiếm sau khi xoay
+        float rotatedHeight =
+                (float)(textWidth * Math.sin(angle)
+                      + textHeight * Math.cos(angle));
+
+        // Chừa lề trên
+        float marginTop = 35;
+
+        // Điểm bắt đầu
+        float x = marginLeft;
+        float y = pageHeight - rotatedHeight - marginTop;
+
+        // ===== VẼ WATERMARK =====
         cs.beginText();
         cs.setFont(font, fontSize);
 
-        // Rotate around center of page, then offset to center the text
-        // The rotation happens around (centerX, centerY)
-        // Then we offset by half the text width and height to truly center it
-        cs.setTextMatrix(Matrix.getRotateInstance(Math.toRadians(45), centerX, centerY));
-
-        // Offset to center the text (accounting for rotation)
-        // For rotated text, we need to offset by -textWidth/2 and -textHeight/4
-        // (textHeight/4 is approximate for vertical centering with Helvetica)
-        cs.newLineAtOffset(-textWidth / 2, -textHeight / 4);
+        cs.setTextMatrix(
+                Matrix.getRotateInstance(
+                        angle,
+                        x,
+                        y));
 
         cs.showText(watermarkText);
+
         cs.endText();
       }
     }
